@@ -53,6 +53,14 @@ export function createBot(name, weaponKey, skill) {
     seeTimer: 0,
     loseTimer: 0,
     lastSeen: { x: 0, y: 0, z: 0 },
+    // Grudge memory: whoever shot us last is answered first (set by applyDamage).
+    lastAttacker: null,
+    attackMemory: 0,
+    // Cover state: node to duck into when hurt or caught reloading.
+    coverNode: null,
+    coverPath: null,
+    coverIdx: 0,
+    coverTimer: 0,
     // Plan state: 'route' | 'hold' | 'plant' | 'defuse' | 'hunt'
     mode: 'hold',
     path: [],

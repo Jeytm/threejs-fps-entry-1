@@ -36,9 +36,17 @@ export function createPlayer(spawn) {
     isPlayer: true,
     team: 'copper',
     radius: RADIUS,
-    // Recoil: aim offset that decays back to zero.
+    // Recoil: aim offset that decays back to zero. recoilPitch is net of a
+    // crouch damping factor so the climb reads lighter when set.
     recoilYaw: 0,
     recoilPitch: 0,
+    // Sustained-fire bloom: extra spread that grows per shot, recovers with time.
+    bloom: 0,
+    // Alternating horizontal recoil sign so spray kicks side-to-side.
+    recoilSign: 1,
+    // Cosmetic camera kick on being hit (decays fast, view-only).
+    hurtKickYaw: 0,
+    hurtKickPitch: 0,
     // Guns: which is held, and each gun's own magazine/reserve.
     gun: 'marrow',
     lastGun: 'marrow',
