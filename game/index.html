@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' fill='%23232c36'/%3E%3Crect x='3' y='3' width='10' height='10' fill='%23e8a33d'/%3E%3C/svg%3E">
+<title>Cinderfall — round-based tactical FPS</title>
+<style>
+  /* One palette for HUD and world (see src/palette.js): dusk slate surfaces,
+     ink text, amber Copper accent, cobalt Cobalt accent. */
+  :root {
+    --canvas: #232c36;
+    --surface: #2a323c;
+    --surface-2: #313a45;
+    --hairline: #3e4750;
+    --ink: #e8e4da;
+    --muted: #98a2ac;
+    --amber: #e8a33d;
+    --cobalt: #4f8fb5;
+    --danger: #ff6a5a;
+    --font-ui: system-ui, -apple-system, 'Segoe UI', sans-serif;
+    --font-readout: ui-monospace, 'SF Mono', Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: var(--canvas); color: var(--ink); font-family: var(--font-ui); }
+  #game, #game canvas { position: fixed; inset: 0; display: block; }
+  #hud { position: fixed; inset: 0; pointer-events: none; user-select: none; }
+
+  /* Damage vignette */
+  #vignette {
+    position: fixed; inset: 0; opacity: 0;
+    background: radial-gradient(ellipse at center, transparent 42%, rgba(210, 40, 25, 0.55) 100%);
+  }
+
+  /* Crosshair: four hairlines driven by --gap from the sim's spread */
+  #crosshair { position: fixed; left: 50%; top: 50%; width: 0; height: 0; --gap: 4px; }
+  #crosshair .ch { position: absolute; background: var(--ink); opacity: 0.9; box-shadow: 0 0 2px rgba(0,0,0,0.8); }
+  .ch-t { left: -1px; bottom: var(--gap); width: 2px; height: 7px; }
+  .ch-b { left: -1px; top: var(--gap); width: 2px; height: 7px; }
+  .ch-l { top: -1px; right: var(--gap); height: 2px; width: 7px; }
+  .ch-r { top: -1px; left: var(--gap); height: 2px; width: 7px; }
+
+  #hitmarker { position: fixed; left: 50%; top: 50%; width: 30px; height: 30px; transform: translate(-50%,-50%) rotate(45deg); opacity: 0; color: var(--ink); }
+  #hitmarker::before, #hitmarker::after { content: ''; position: absolute; background: currentColor; }
+  #hitmarker::before { left: 14px; top: 0; width: 2px; height: 10px; box-shadow: 0 20px 0 currentColor; }
+  #hitmarker::after { top: 14px; left: 0; height: 2px; width: 10px; box-shadow: 20px 0 0 currentColor; }
+
+  /* Top bar: score + timer */
+  #topbar {
+    position: fixed; top: 18px; left: 50%; transform: translateX(-50%);
+    display: flex; align-items: center; gap: 14px;
+    font-family: var(--font-readout);
+  }
+  .score { font-size: 26px; padding: 4px 12px; background: rgba(20,25,30,0.72); border: 1px solid var(--hairline); border-radius: 4px; }
+  .score.copper { color: var(--amber); }
+  .score.cobalt { color: var(--cobalt); }
+  #round-timer { font-size: 22px; min-width: 74px; text-align: center; padding: 5px 10px; background: rgba(20,25,30,0.72); border: 1px solid var(--hairline); border-radius: 4px; }
+
+  #round-label {
+    position: fixed; top: 20px; left: 24px;
+    font-family: var(--font-readout); font-size: 13px; letter-spacing: 0.12em;
+    color: var(--muted); background: rgba(20,25,30,0.6); padding: 6px 10px; border-radius: 4px;
+  }
+
+  #bomb-banner {
+    position: fixed; top: 64px; left: 50%; transform: translateX(-50%);
+    display: none; font-family: var(--font-readout); font-size: 15px; letter-spacing: 0.18em;
+    color: var(--danger); background: rgba(20,25,30,0.75); border: 1px solid var(--danger);
+    padding: 6px 14px; border-radius: 4px; animation: pulse 1s infinite alternate;
+  }
+  @keyframes pulse { from { opacity: 0.75; } to { opacity: 1; } }
+
+  #objective-banner {
+    position: fixed; bottom: 120px; left: 50%; transform: translateX(-50%);
+    opacity: 0; transition: opacity 200ms; font-family: var(--font-readout); font-size: 13px;
+    letter-spacing: 0.1em; color: var(--ink); background: rgba(20,25,30,0.7);
+    padding: 5px 12px; border-radius: 4px;
+  }
+
+  /* Plant/defuse progress */
+  #progress-wrap { position: fixed; bottom: 88px; left: 50%; transform: translateX(-50%); display: none; text-align: center; }
+  #progress-label { font-family: var(--font-readout); font-size: 12px; letter-spacing: 0.14em; color: var(--amber); margin-bottom: 6px; }
+  #progress-bar { width: 220px; height: 8px; background: rgba(20,25,30,0.8); border: 1px solid var(--hairline); border-radius: 3px; overflow: hidden; }
+  #progress-fill { height: 100%; width: 0; background: var(--amber); }
+
+  /* Bottom bar: health / money / ammo */
+  #bottombar {
+    position: fixed; left: 24px; right: 24px; bottom: 20px;
+    display: flex; align-items: flex-end; justify-content: space-between;
+    font-family: var(--font-readout);
+  }
+  #health-box {
+    display: flex; align-items: baseline; gap: 8px;
+    background: rgba(20,25,30,0.72); border: 1px solid var(--hairline);
+    border-radius: 4px; padding: 8px 14px;
+  }
+  .hud-icon { color: var(--amber); display: inline-flex; align-self: center; }
+  #health-num { font-size: 34px; line-height: 1; }
+  #armor-num { font-size: 15px; color: var(--cobalt); }
+  #money-num { font-size: 20px; color: var(--amber); background: rgba(20,25,30,0.72); border: 1px solid var(--hairline); border-radius: 4px; padding: 10px 14px; }
+  #ammo-box {
+    display: flex; align-items: baseline; gap: 8px;
+    background: rgba(20,25,30,0.72); border: 1px solid var(--hairline);
+    border-radius: 4px; padding: 8px 14px;
+  }
+  #ammo-mag { font-size: 34px; line-height: 1; }
+  #ammo-reserve { font-size: 15px; color: var(--muted); }
+  #ammo-name { font-size: 13px; color: var(--muted); letter-spacing: 0.08em; }
+
+  #grenade-note { position: fixed; right: 24px; bottom: 76px; font-family: var(--font-readout); font-size: 12px; color: var(--amber); text-align: right; }
+
+  #killfeed { position: fixed; top: 18px; right: 24px; display: flex; flex-direction: column; gap: 4px; align-items: flex-end; }
+  .killfeed-row {
+    font-family: var(--font-readout); font-size: 12.5px; color: var(--ink);
+    background: rgba(20,25,30,0.72); border: 1px solid var(--hairline);
+    padding: 4px 10px; border-radius: 4px;
+  }
+  .killfeed-row b { color: var(--amber); font-weight: 500; }
+  .killfeed-row .kf-head { color: var(--danger); }
+
+  /* Overlay card (menu / buy / round end / match end) */
+  #overlay {
+    position: fixed; inset: 0; display: flex; place-items: center;
+    background: color-mix(in srgb, var(--canvas) 82%, transparent);
+    pointer-events: auto; cursor: pointer;
+  }
+  #overlay-card {
+    width: min(760px, calc(100vw - 48px));
+    padding: 36px 40px;
+    background: var(--surface);
+    border: 1px solid var(--hairline);
+    border-radius: 6px;
+    box-shadow: 0 30px 80px rgba(0,0,0,0.5);
+  }
+  #overlay-card h1 { margin: 0 0 4px; font-size: 40px; font-weight: 600; letter-spacing: 0.04em; color: var(--amber); }
+  #overlay-card h3 { margin: 18px 0 8px; font-size: 14px; letter-spacing: 0.14em; color: var(--muted); font-weight: 500; }
+  #overlay-sub { margin: 0 0 18px; font-size: 15px; color: var(--muted); }
+  #overlay-body { font-size: 14px; line-height: 1.55; color: var(--ink); }
+  #overlay-body p { margin: 6px 0; }
+  #overlay-go { margin: 22px 0 0; font-family: var(--font-readout); font-size: 13px; letter-spacing: 0.1em; color: var(--amber); }
+
+  .menu-cols { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 18px; }
+  .menu-col h3 { margin-top: 0; }
+  .menu-col p { font-size: 13px; color: var(--muted); }
+
+  .end-score { font-family: var(--font-readout); font-size: 44px; text-align: center; margin: 18px 0; }
+  .end-score .copper { color: var(--amber); }
+  .end-score .cobalt { color: var(--cobalt); }
+  .end-note { text-align: center; color: var(--muted); }
+
+  /* Buy menu */
+  .shop { display: grid; grid-template-columns: 1.4fr 1fr; gap: 22px; }
+  .shop-col { display: flex; flex-direction: column; gap: 8px; }
+  .buy-row {
+    display: flex; justify-content: space-between; align-items: center;
+    font: inherit; font-size: 14px; text-align: left;
+    padding: 10px 14px; background: var(--surface-2);
+    border: 1px solid var(--hairline); border-radius: 4px; color: var(--ink);
+    cursor: pointer;
+  }
+  .buy-row:hover:not(:disabled) { border-color: var(--amber); }
+  .buy-row .buy-price { font-family: var(--font-readout); color: var(--amber); }
+  .buy-row.own { opacity: 0.55; cursor: default; }
+  .buy-row.cant { opacity: 0.45; cursor: default; }
+  .buy-row.cant .buy-price { color: var(--danger); }
+  .shop-info { border-left: 1px solid var(--hairline); padding-left: 22px; }
+  .shop-info h3 { margin-top: 0; }
+  .shop-money { font-family: var(--font-readout); font-size: 22px; color: var(--amber); }
+
+  @media (prefers-reduced-motion: reduce) {
+    #bomb-banner { animation: none; }
+  }
+</style>
+</head>
+<body>
+<div id="game"></div>
+<div id="hud" aria-hidden="true"></div>
+<script type="importmap">
+{
+  "imports": {
+    "three": "./vendor/three/three.module.min.js"
+  }
+}
+</script>
+<script type="module" src="./src/main.js"></script>
+</body>
+</html>
